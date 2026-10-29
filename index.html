@@ -1597,6 +1597,7 @@ function renderAllTareas(){
   if(!$("#v-inicio").hidden)renderInicio();
 }
 async function traerYVer(c,render,card){if(nubeOn()){try{await traerLecturas(c,true)}catch(e){toast(sbMsg(e))}}render();$(card).scrollIntoView({block:"start",behavior:"smooth"})}
+function readPkTable(file){return readFile(file).then(wb=>{let aoa=[],bs=-1;for(const n of wb.SheetNames){const a=sheetAoa(wb.Sheets[n]);if(!a.length)continue;const h=pkDetectHeader(a),m=pkAutoMap((a[h]||[]).map(norm),a.slice(h+1)),sc=["nv","cod","qty"].filter(f=>m[f]!=null).length*1e6+a.length;if(sc>bs){bs=sc;aoa=a}}return aoa})}
 function readTable(file){return readFile(file).then(wb=>{let aoa=[];for(const n of wb.SheetNames){const a=sheetAoa(wb.Sheets[n]);if(a.length>aoa.length)aoa=a}return aoa})}
 function mapCols(hdr,rules){const h=hdr.map(deacc),m={},used=new Set();for(const [f,re,not] of rules){const i=h.findIndex((x,j)=>!used.has(j)&&x&&re.test(x)&&!(not&&not.test(x)));if(i>=0){m[f]=i;used.add(i)}}return m}
 function selMap(fields,hdr,m,onch){return fields.map(([f,l])=>`<label class="f">${l}<select data-mf="${f}"><option value="">— ninguna —</option>${hdr.map((h,i)=>`<option value="${i}" ${m[f]===i?"selected":""}>${esc(h)}</option>`).join("")}</select></label>`).join("")}
@@ -1659,15 +1660,44 @@ $("#btnRcExp").onclick=()=>{const c=conteos.find(x=>x.id===rcSel);if(!c)return;c
 /* ===================== PICKING (supervisor) ===================== */
 let pkData=store.get("pk_data",null), pkOff=new Set(store.get("pk_off",[])), pkSel=store.get("pk_sel",null), pkNvSel="";
 const PKF=[["nv","Nota de venta *"],["cli","Cliente"],["cod","Código *"],["desc","Descripción"],["qty","Cantidad *"],["fecha","Fecha"]];
-function pkParse(){const d=pkData;if(!d||!d.aoa)return;const m=d.map,lines=[];
-  for(const r of d.aoa.slice(d.h+1)){const nv=m.nv!=null?codeStr(r[m.nv]):"",cod=m.cod!=null?codeStr(r[m.cod]):"",q=m.qty!=null?num(r[m.qty]):null;if(!nv||!cod||JUNK.test(nv)||q==null||q<=0)continue;
-    lines.push({nv,cli:m.cli!=null?norm(r[m.cli]):"",cod,desc:m.desc!=null?norm(r[m.desc]):"",qty:q,fecha:m.fecha!=null?norm(r[m.fecha]):""})}
-  d.lines=lines;}
+/* columnas del archivo de notas: por nombre de encabezado y, si no calza, por el contenido */
+const PKRX={
+  nv:[/(nota|^n[°º.]?\s*(nv|doc|nota|pedido)|^nv\b|^n\.?\s*v\.?$|folio|n[uú]m(ero)?\s*(de\s*)?(doc|nota|pedido|nv)|^n[uú]mero$|^nro\.?$|^num\.?$|^n[°º]$|pedido|orden\s*(de\s*)?venta|^doc(umento)?\.?$|^id\s*(nota|pedido))/,/(fecha|tipo|rut|vendedor|bodega|client|monto|total|cant)/],
+  cod:[/(^c[oó]d|sku|art[ií]culo|^item|^producto$|^cod\.?\s*prod|^material|^referencia|^ref\.?$|^n[°º.]?\s*parte)/,/(barra|ean|client|vend|bodega|doc|nota|pedido|rut|^cod\.?\s*(nv|venta)|descrip|nombre)/],
+  qty:[/(^cant|cantidad|qty|solicit|pedid[ao]s?$|^unidades$|^q$|a\s*despachar|a\s*preparar|pendiente)/,/(^u\.?\s*m\.?$|medida|^unidad$|precio|valor|monto|total\s*\$|neto|costo|^und?\.?$)/],
+  cli:[/(raz[oó]n|client|^nombre$|^se[nñ]or|destinatario)/,/(rut|c[oó]d|^id)/],
+  desc:[/(descrip|detalle|glosa|nombre\s*(del\s*)?(producto|art))/,/(client|raz)/],
+  fecha:[/fecha/,null]
+};
+function pkDetectHeader(aoa){let best=-1,bs=0;for(let i=0;i<Math.min(aoa.length,60);i++){let k=0;for(const c of aoa[i]||[]){const x=deacc(c);if(!x||typeof c==="number")continue;for(const f in PKRX){const [re,no]=PKRX[f];if(re.test(x)&&!(no&&no.test(x))){k++;break}}}if(k>bs){bs=k;best=i}}return bs>=2?best:detectHeader(aoa)}
+function pkAutoMap(hdr,data){
+  const h=hdr.map(deacc),m={},used=new Set(),rows=data.filter(r=>r&&r.some(v=>norm(v)!=="")).slice(0,400);
+  const isNum=i=>{const v=rows.map(r=>r[i]).filter(v=>norm(v)!=="");return v.length>0&&v.filter(x=>num(x)!=null).length>=v.length*.8};
+  const pick=(f,test)=>{if(m[f]!=null)return;const [re,no]=PKRX[f];const i=h.findIndex((x,j)=>!used.has(j)&&x&&re.test(x)&&!(no&&no.test(x))&&(!test||test(j)));if(i>=0){m[f]=i;used.add(i)}};
+  pick("qty",isNum);pick("nv");pick("cod");pick("cli");pick("desc");pick("fecha");pick("qty");
+  if(m.cli==null){const i=h.findIndex((x,j)=>!used.has(j)&&/client|raz/.test(x));if(i>=0){m.cli=i;used.add(i)}}
+  if(m.qty==null){/* respaldo: última columna con números chicos */const ncol=Math.max(hdr.length,...rows.map(r=>r.length));for(let i=ncol-1;i>=0;i--){if(used.has(i)||!isNum(i))continue;const v=rows.map(r=>num(r[i])).filter(x=>x!=null);if(v.length&&v.every(x=>x>=0&&x<1e6)){m.qty=i;used.add(i);break}}}
+  return m;
+}
+function pkParse(){const d=pkData;if(!d||!d.aoa)return;const m=d.map,lines=[];let last=null,skip=0,noQty=0;
+  for(const r of d.aoa.slice(d.h+1)){if(!r||!r.some(v=>norm(v)!==""))continue;
+    let nv=m.nv!=null?codeStr(r[m.nv]):"";const cod=m.cod!=null?codeStr(r[m.cod]):"",q=m.qty!=null?num(r[m.qty]):null;
+    let cli=m.cli!=null?norm(r[m.cli]):"",fecha=m.fecha!=null?norm(r[m.fecha]):"";
+    if(nv&&!JUNK.test(nv))last={nv,cli,fecha};
+    else if(!nv&&last&&cod&&!JUNK.test(cod)){nv=last.nv;cli=cli||last.cli;fecha=fecha||last.fecha} /* informes agrupados: la nota solo viene en la primera línea */
+    if(!nv||!cod||JUNK.test(nv)||JUNK.test(cod)){skip++;continue}
+    if(q==null||q<=0){noQty++;continue}
+    lines.push({nv,cli,cod,desc:m.desc!=null?norm(r[m.desc]):"",qty:q,fecha})}
+  d.lines=lines;d.skip=skip;d.noQty=noQty;}
+function pkDiag(){const d=pkData;if(!d||d.lines.length)return "";const m=d.map,miss=PKF.filter(([f,l])=>/\*/.test(l)&&m[f]==null).map(([,l])=>l.replace(" *",""));
+  if(miss.length)return `<div class="notice">No encontré la columna de <b>${esc(miss.join(", "))}</b>. Elígela arriba en las listas y las notas aparecen al tiro.</div>`;
+  if(d.noQty)return `<div class="notice">La columna de <b>Cantidad</b> que elegí no trae números en ${fmt(d.noQty)} filas. Revisa arriba si es la columna correcta.</div>`;
+  return `<div class="notice">No encontré líneas con nota, código y cantidad bajo la fila de encabezados. Revisa que las columnas elegidas arriba sean las correctas.</div>`}
 function pkNotas(){const map=new Map();for(const l of (pkData&&pkData.lines)||[]){let n=map.get(l.nv);if(!n){n={nv:l.nv,cli:l.cli,fecha:l.fecha,lines:[]};map.set(l.nv,n)}n.lines.push(l)}return [...map.values()]}
 $("#btnPkFile").onclick=()=>$("#filePk").click();
 dropZone($("#dropPk"),$("#filePk"),async files=>{const file=files[0];if(!file)return;
-  try{const aoa=await readTable(file),h=detectHeader(aoa),hdr=(aoa[h]||[]).map((x,i)=>norm(x)||"Col "+(i+1));
-    const map=mapCols(hdr,[["nv",/(nota|folio|documento|^n[°º.]?\s*nv$|^nv$|^pedido$|orden de venta)/],["cod",/^c[oó]d|sku|art[ií]culo|^item/,/barra|ean|client/],["qty",/cant|qty|unid|solicit/],["cli",/client|raz[oó]n|^nombre/],["desc",/descrip|detalle|glosa|^producto$/],["fecha",/fecha/]]);
+  try{const aoa=await readPkTable(file),h=pkDetectHeader(aoa),ncol=Math.max(...aoa.slice(h,h+200).map(r=>(r||[]).length),0),hdr=Array.from({length:ncol},(_,i)=>norm((aoa[h]||[])[i])||"Col "+(i+1));
+    const map=pkAutoMap(hdr,aoa.slice(h+1));
     pkData={file:file.name,at:new Date().toISOString(),aoa,h,hdr,map};pkParse();pkOff=new Set();store.set("pk_off",[]);savePk();renderPkData();
   }catch(err){toast(err.message||String(err))}});
 function savePk(){if(!pkData)return;const {aoa,...rest}=pkData;store.set("pk_data",{...rest,aoa:aoa.length<=6000?aoa:aoa.slice(0,6000)})}
@@ -1678,7 +1708,7 @@ function renderPkData(){
   $("#pkMap").innerHTML=selMap(PKF,pkData.hdr,pkData.map);
   $$("#pkMap select").forEach(s=>s.onchange=()=>{pkData.map[s.dataset.mf]=s.value===""?null:+s.value;pkParse();savePk();renderPkData()});
   const notas=pkNotas(), clis=new Set(pkData.lines.map(l=>l.cli).filter(Boolean)), miss=erp&&!erp.maestro?new Set(pkData.lines.filter(l=>!findItem(l.cod)).map(l=>l.cod)):null;
-  $("#pkSum").innerHTML=`<span class="pill p-info">${fmt(notas.length)} notas de venta</span><span class="pill p-info">${fmt(pkData.lines.length)} líneas</span><span class="pill p-info">${fmt(clis.size)} clientes</span>${miss&&miss.size?`<span class="pill p-warn">${fmt(miss.size)} códigos no están en el maestro</span>`:""}${!erp||erp.maestro?`<span class="small muted">Carga el informe del ERP en el Panel de inventario para usar descripciones y conversiones.</span>`:""}`;
+  $("#pkSum").innerHTML=pkDiag()+`<span class="pill p-info">${fmt(notas.length)} notas de venta</span><span class="pill p-info">${fmt(pkData.lines.length)} líneas</span><span class="pill p-info">${fmt(clis.size)} clientes</span>${miss&&miss.size?`<span class="pill p-warn">${fmt(miss.size)} códigos no están en el maestro</span>`:""}${!erp||erp.maestro?`<span class="small muted">Carga el informe del ERP en el Panel de inventario para usar descripciones y conversiones.</span>`:""}`;
   const q=deacc($("#pkQ").value), on=notas.filter(n=>!pkOff.has(n.nv));
   $("#pkInfo").textContent=`${fmt(on.length)} de ${fmt(notas.length)} notas seleccionadas · ${fmt(on.reduce((a,n)=>a+n.lines.length,0))} líneas`;
   const list=notas.filter(n=>!q||deacc(n.nv+" "+n.cli).includes(q)).slice(0,300);
