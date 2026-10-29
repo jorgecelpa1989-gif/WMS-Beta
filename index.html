@@ -1,4 +1,5 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style><link rel="manifest" href="manifest.json"><meta name="theme-color" content="#e9f2f7"><link rel="apple-touch-icon" href="icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"></head><body><title>Conteo de Bodega · Grupo Vector</title>
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0}img{max-width:100%}[hidden]{display:none!important}#pkDetTbl{font-size:12.5px}#pkDetTbl th,#pkDetTbl td{padding-left:7px;padding-right:7px}#pkDetTbl td.desc{white-space:normal;min-width:170px}#pkDetTbl td:nth-child(4){white-space:normal;min-width:140px}#pkDetTbl th:last-child,#pkDetTbl td:last-child{background:rgba(46,125,181,.08)}
+</style><link rel="manifest" href="manifest.json"><meta name="theme-color" content="#e9f2f7"><link rel="apple-touch-icon" href="icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"></head><body><title>Conteo de Bodega · Grupo Vector</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
@@ -677,15 +678,13 @@ to anon, authenticated;
     <div class="drop" id="dropPk" tabindex="0"><b>Arrastra el archivo aquí o toca para elegirlo</b><span class="small">.xlsx · .xls · .csv</span></div>
     <input type="file" id="filePk" accept=".xlsx,.xls,.csv,.txt" hidden>
     <button class="btn sm" id="btnPkFile" hidden>Elegir archivo</button>
-  </div>
-  <div class="card" id="pkMapCard" hidden>
-    <div class="row"><h2>Columnas detectadas</h2><span class="sep"></span><span class="small muted" id="pkFileInfo"></span></div>
-    <div class="row" id="pkMap"></div>
-    <div class="row" id="pkSum"></div>
+    <div class="row" id="pkFileRow" hidden style="margin-top:10px"><span class="small muted">Archivo cargado:</span><b class="small" id="pkFileInfo"></b></div>
+    <div id="pkDiag"></div>
   </div>
   <div class="card" id="pkNewCard" hidden>
     <div class="eyebrow">Paso 2</div>
-    <h2>Crear picking</h2>
+    <h2>Elige las notas de venta</h2>
+    <div class="row" id="pkSum"></div>
     <div class="row" id="pkFil" hidden></div>
     <div class="row">
       <input id="pkQ" placeholder="Buscar nota, cliente o vendedor" style="flex:1 1 220px">
@@ -693,6 +692,13 @@ to anon, authenticated;
       <span class="small muted" id="pkInfo"></span>
     </div>
     <div class="tbl" style="max-height:320px"><table id="pkNvTbl"></table></div>
+  </div>
+  <div class="card" id="pkDetCard" hidden>
+    <div class="eyebrow">Paso 3</div>
+    <div class="row"><h2>Detalle de las notas seleccionadas</h2><span class="sep"></span><button class="btn sm" id="btnPkDetExp">Descargar detalle (Excel)</button></div>
+    <div class="row" id="pkDetSum"></div>
+    <div class="tbl" style="max-height:420px"><table id="pkDetTbl"></table></div>
+    <p class="small muted" id="pkDetNote"></p>
     <div class="row">
       <label class="f" style="flex:1 1 220px">Nombre<input id="pkNombre" placeholder="Ej: Despacho mañana · Ruta norte"></label>
       <label class="f" style="flex:0 1 230px">Modo<select id="pkModo"><option value="nota">Por nota de venta</option><option value="consolidado">Consolidado por producto</option></select></label>
@@ -1660,7 +1666,7 @@ $("#btnRcExp").onclick=()=>{const c=conteos.find(x=>x.id===rcSel);if(!c)return;c
 
 /* ===================== PICKING (supervisor) ===================== */
 let pkData=store.get("pk_data",null), pkOff=new Set(store.get("pk_off",[])), pkSel=store.get("pk_sel",null), pkNvSel="";
-const PKF=[["nv","Nota de venta *"],["cod","Código *"],["qty","Cantidad a preparar *"],["cli","Cliente"],["desc","Descripción"],["um","Unidad"],["fecha","Fecha entrega"],["est","Estado"],["ven","Vendedor"],["zona","Zona"]];
+const PKF=[["nv","Nota de venta *"],["cod","Código *"],["qty","Cantidad a preparar *"],["cli","Cliente"],["desc","Descripción"],["um","Unidad"],["fecha","Fecha entrega"],["est","Estado"],["ven","Vendedor"],["zona","Zona"],["ped","Pedido"],["fac","Facturado"]];
 let pkF=Object.assign({est:"",fecha:"",ven:"",zona:""},store.get("pk_f",{}));
 /* columnas del archivo de notas: por nombre de encabezado y, si no calza, por el contenido */
 const PKRX={
@@ -1673,7 +1679,9 @@ const PKRX={
   um:[/(^u\.?\s*m\.?$|unidad\s*(de\s*)?medida|^unidad$|^medida$)/,null],
   est:[/^(estado|status)/,null],
   ven:[/(vendedor|ejecutivo)/,/c[oó]d/],
-  zona:[/^(zona|sector|ruta|comuna|ciudad)/,null]
+  zona:[/^(zona|sector|ruta|comuna|ciudad)/,null],
+  ped:[/^(pedido|cant\.?\s*pedid|cantidad\s*pedida|cant\.?\s*solicit|solicitad)/,/(saldo|despach|fecha|^n)/],
+  fac:[/^factur/,null]
 };
 const PKSALDO=/(saldo\s*(por\s*|a\s*|de\s*)?despach|por\s*despachar|pendiente\s*(de\s*|por\s*)?despach|a\s*despachar)/;
 function pkDetectHeader(aoa){let best=-1,bs=0;for(let i=0;i<Math.min(aoa.length,60);i++){let k=0;for(const c of aoa[i]||[]){const x=deacc(c);if(!x||typeof c==="number")continue;for(const f in PKRX){const [re,no]=PKRX[f];if(re.test(x)&&!(no&&no.test(x))){k++;break}}}if(k>bs){bs=k;best=i}}return bs>=2?best:detectHeader(aoa)}
@@ -1682,7 +1690,7 @@ function pkAutoMap(hdr,data){
   const isNum=i=>{const v=rows.map(r=>r[i]).filter(v=>norm(v)!=="");return v.length>0&&v.filter(x=>num(x)!=null).length>=v.length*.8};
   const pick=(f,test)=>{if(m[f]!=null)return;const [re,no]=PKRX[f];const i=h.findIndex((x,j)=>!used.has(j)&&x&&re.test(x)&&!(no&&no.test(x))&&(!test||test(j)));if(i>=0){m[f]=i;used.add(i)}};
   {const i=h.findIndex((x,j)=>x&&PKSALDO.test(x)&&isNum(j));if(i>=0){m.qty=i;used.add(i)}}
-  pick("qty",isNum);pick("nv");pick("cod");pick("cli");pick("desc");pick("um");pick("fecha");pick("est");pick("ven");pick("zona");pick("qty");
+  pick("qty",isNum);pick("nv");pick("cod");pick("cli");pick("desc");pick("um");pick("fecha");pick("est");pick("ven");pick("zona");pick("qty");pick("ped",isNum);pick("fac",isNum);
   if(m.ven==null){const i=h.findIndex((x,j)=>!used.has(j)&&/vendedor/.test(x));if(i>=0){m.ven=i;used.add(i)}}
   if(m.cli==null){const i=h.findIndex((x,j)=>!used.has(j)&&/client|raz/.test(x));if(i>=0){m.cli=i;used.add(i)}}
   if(m.qty==null){/* respaldo: última columna con números chicos */const ncol=Math.max(hdr.length,...rows.map(r=>r.length));for(let i=ncol-1;i>=0;i--){if(used.has(i)||!isNum(i))continue;const v=rows.map(r=>num(r[i])).filter(x=>x!=null);if(v.length&&v.every(x=>x>=0&&x<1e6)){m.qty=i;used.add(i);break}}}
@@ -1696,12 +1704,13 @@ function pkParse(){const d=pkData;if(!d||!d.aoa)return;const m=d.map,lines=[];le
     else if(!nv&&last&&cod&&!JUNK.test(cod)){nv=last.nv;cli=cli||last.cli;fecha=fecha||last.fecha;est=est||last.est;ven=ven||last.ven;zona=zona||last.zona} /* informes agrupados: la nota solo viene en la primera línea */
     if(!nv||!cod||JUNK.test(nv)||JUNK.test(cod)){skip++;continue}
     if(q==null||q<=0){noQty++;continue}
-    lines.push({nv,cli,cod,desc:g("desc"),um:g("um"),qty:q,fecha,est,ven,zona})}
+    const nn=f=>m[f]!=null?num(r[m[f]]):null;
+    lines.push({nv,cli,cod,desc:g("desc"),um:g("um"),qty:q,fecha,est,ven,zona,ped:nn("ped"),fac:nn("fac")})}
   d.lines=lines;d.skip=skip;d.noQty=noQty;}
 function pkDiag(){const d=pkData;if(!d||d.lines.length)return "";const m=d.map,miss=PKF.filter(([f,l])=>/\*/.test(l)&&m[f]==null).map(([,l])=>l.replace(" *",""));
-  if(miss.length)return `<div class="notice">No encontré la columna de <b>${esc(miss.join(", "))}</b>. Elígela arriba en las listas y las notas aparecen al tiro.</div>`;
-  if(d.noQty)return `<div class="notice">La columna de <b>Cantidad</b> que elegí no trae números en ${fmt(d.noQty)} filas. Revisa arriba si es la columna correcta.</div>`;
-  return `<div class="notice">No encontré líneas con nota, código y cantidad bajo la fila de encabezados. Revisa que las columnas elegidas arriba sean las correctas.</div>`}
+  if(miss.length)return `<div class="notice">No encontré la columna de <b>${esc(miss.join(", "))}</b>. Revisa que el archivo sea el "Informe Notas de Ventas por Estado" del ERP.</div>`;
+  if(d.noQty)return `<div class="notice">La columna de <b>Cantidad</b> que elegí no trae números en ${fmt(d.noQty)} filas. Revisa que sea el informe correcto.</div>`;
+  return `<div class="notice">No encontré líneas con nota, código y cantidad bajo la fila de encabezados. Revisa que el archivo sea el informe de notas de venta del ERP.</div>`}
 function pkNotas(){const map=new Map();for(const l of (pkData&&pkData.lines)||[]){let n=map.get(l.nv);if(!n){n={nv:l.nv,cli:l.cli,fecha:l.fecha,est:l.est||"",ven:l.ven||"",zona:l.zona||"",lines:[]};map.set(l.nv,n)}n.lines.push(l)}return [...map.values()]}
 const PKFIL=[["est","Estado"],["fecha","Fecha entrega"],["ven","Vendedor"],["zona","Zona"]];
 const pkFechaK=f=>{const m=String(f).match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);return m?(m[3].length===2?"20"+m[3]:m[3])+m[2].padStart(2,"0")+m[1].padStart(2,"0"):String(f)};
@@ -1717,13 +1726,11 @@ dropZone($("#dropPk"),$("#filePk"),async files=>{const file=files[0];if(!file)re
 function savePk(){if(!pkData)return;const {aoa,...rest}=pkData;store.set("pk_data",{...rest,aoa:aoa.length<=6000?aoa:aoa.slice(0,6000)})}
 function renderPkData(){
   ensureErp();
-  const has=!!(pkData&&pkData.lines);$("#pkMapCard").hidden=!has;$("#pkNewCard").hidden=!has;if(!has)return;
-  $("#pkFileInfo").textContent=pkData.file;
-  $("#pkMap").innerHTML=`<label class="f" style="flex:0 0 130px">Encabezados en fila<input type="number" id="pkHdrRow" min="1" max="${pkData.aoa.length}" value="${pkData.h+1}"></label>`+selMap(PKF,pkData.hdr,pkData.map);
-  $("#pkHdrRow").onchange=e=>{const v=Math.round(+e.target.value);if(v>=1&&v<=pkData.aoa.length&&v-1!==pkData.h)pkLoad(pkData.aoa,v-1,pkData.file)};
-  $$("#pkMap select").forEach(s=>s.onchange=()=>{pkData.map[s.dataset.mf]=s.value===""?null:+s.value;pkParse();savePk();renderPkData()});
+  const has=!!(pkData&&pkData.lines);$("#pkFileRow").hidden=!has;$("#pkDiag").innerHTML=has?pkDiag():"";
+  const ok=has&&pkData.lines.length>0;$("#pkNewCard").hidden=!ok;$("#pkDetCard").hidden=!ok;if(!has)return;
+  $("#pkFileInfo").textContent=pkData.file;if(!ok)return;
   const notas=pkNotas(), clis=new Set(pkData.lines.map(l=>l.cli).filter(Boolean)), miss=erp&&!erp.maestro?new Set(pkData.lines.filter(l=>!findItem(l.cod)).map(l=>l.cod)):null;
-  $("#pkSum").innerHTML=pkDiag()+`<span class="pill p-info">${fmt(notas.length)} notas de venta</span><span class="pill p-info">${fmt(pkData.lines.length)} líneas</span><span class="pill p-info">${fmt(clis.size)} clientes</span>${miss&&miss.size?`<span class="pill p-warn">${fmt(miss.size)} códigos no están en el maestro</span>`:""}${!erp||erp.maestro?`<span class="small muted">Carga el informe del ERP en el Panel de inventario para usar descripciones y conversiones.</span>`:""}`;
+  $("#pkSum").innerHTML=`<span class="pill p-info">${fmt(notas.length)} notas de venta</span><span class="pill p-info">${fmt(pkData.lines.length)} líneas</span><span class="pill p-info">${fmt(clis.size)} clientes</span>${miss&&miss.size?`<span class="pill p-warn">${fmt(miss.size)} códigos no están en el maestro</span>`:""}${!erp||erp.maestro?`<span class="small muted">Carga el informe del ERP en el Panel de inventario para usar descripciones y conversiones.</span>`:""}`;
   if(pkData.noQty)$("#pkSum").insertAdjacentHTML("beforeend",`<span class="pill p-mut">${fmt(pkData.noQty)} líneas con cantidad 0 no se incluyen${pkData.map.qty!=null&&PKSALDO.test(deacc(pkData.hdr[pkData.map.qty]))?" (ya despachadas)":""}</span>`);
   const fil=PKFIL.filter(([f])=>pkData.map[f]!=null);
   $("#pkFil").innerHTML=fil.map(([f,l])=>{const vals=[...new Set(notas.map(n=>n[f]).filter(Boolean))].sort(f==="fecha"?(a,b)=>pkFechaK(a).localeCompare(pkFechaK(b)):(a,b)=>a.localeCompare(b));
@@ -1735,8 +1742,23 @@ function renderPkData(){
   const cols=[["fecha","Entrega"],["est","Estado"],["ven","Vendedor"],["zona","Zona"]].filter(([f])=>pkData.map[f]!=null);
   $("#pkNvTbl").innerHTML=`<thead><tr><th></th><th>Nota de venta</th><th>Cliente</th>${cols.map(([,l])=>`<th>${l}</th>`).join("")}<th class="num">Líneas</th></tr></thead><tbody>`+list.slice(0,400).map(n=>`<tr><td><input type="checkbox" data-nv="${esc(n.nv)}" ${pkOff.has(n.nv)?"":"checked"}></td><td class="code">${esc(n.nv)}</td><td>${esc(n.cli)}</td>${cols.map(([f])=>`<td class="small">${esc(n[f])}</td>`).join("")}<td class="num">${fmt(n.lines.length)}</td></tr>`).join("")+"</tbody>";
   $$("#pkNvTbl input[data-nv]").forEach(cb=>cb.onchange=()=>{cb.checked?pkOff.delete(cb.dataset.nv):pkOff.add(cb.dataset.nv);store.set("pk_off",[...pkOff]);renderPkData()});
+  renderPkDet3(on);
   $("#btnPkCrear").textContent=`OK · Crear picking (${fmt(on.length)} notas)`;$("#btnPkCrear").disabled=!on.length;
 }
+/* Paso 3: detalle línea por línea de las notas elegidas (columnas fijas del informe del ERP) */
+const PKDET=[["fecha","Fecha"],["nv","N. Venta"],["est","Estado"],["cli","Nombre Cliente"],["cod","Cod. Producto"],["desc","Descripción"],["um","U. Medida"],["ped","Pedido",1],["fac","Facturado",1],["qty","Saldo Despacho",1]];
+function pkDetRows(on){const r=[];for(const n of on)for(const l of n.lines)r.push(l);return r}
+function renderPkDet3(on){const rows=pkDetRows(on),prods=new Set(rows.map(l=>key(l.cod))),tot=rows.reduce((a,l)=>a+l.qty,0);
+  const byUm=new Map();for(const l of rows){const u=UMN(l.um||(findItem(l.cod)||{}).um||"");byUm.set(u,(byUm.get(u)||0)+l.qty)}
+  $("#pkDetSum").innerHTML=`<span class="pill p-info">${fmt(on.length)} notas</span><span class="pill p-info">${fmt(rows.length)} líneas</span><span class="pill p-info">${fmt(prods.size)} productos distintos</span>`+[...byUm].map(([u,q])=>`<span class="pill p-mut">${fmt2(q)} ${esc(u==="un"?"UN":u.toUpperCase())} por despachar</span>`).join("");
+  const val=(l,f)=>f==="um"?(l.um||(findItem(l.cod)||{}).um||""):f==="desc"?(l.desc||(findItem(l.cod)||{}).desc||""):l[f];
+  $("#pkDetTbl").innerHTML=`<thead><tr>${PKDET.map(([,h,n])=>`<th${n?' class="num"':""}>${h}</th>`).join("")}</tr></thead><tbody>`+
+    rows.slice(0,1500).map(l=>`<tr>${PKDET.map(([f,,n])=>{const v=val(l,f);return n?`<td class="num"${f==="qty"?' style="font-weight:600"':""}>${v==null?"":fmt2(v)}</td>`:`<td class="${f==="nv"||f==="cod"?"code":f==="desc"?"desc":"small"}">${esc(v??"")}</td>`}).join("")}</tr>`).join("")+"</tbody>";
+  $("#pkDetNote").textContent=(rows.length>1500?`Se muestran las primeras 1.500 de ${fmt(rows.length)} líneas (el Excel trae todas). `:"")+(pkData.noQty?`Las líneas con saldo de despacho 0 ya están despachadas y no se incluyen.`:"");
+}
+$("#btnPkDetExp").onclick=()=>{const on=pkScope().filter(n=>!pkOff.has(n.nv));if(!on.length)return toast("No hay notas seleccionadas");
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,sheetFrom(pkDetRows(on).map(l=>{const o={};for(const [f,h] of PKDET)o[h]=f==="um"?(l.um||(findItem(l.cod)||{}).um||""):f==="desc"?(l.desc||(findItem(l.cod)||{}).desc||""):(l[f]??"");return o})),"Detalle");
+  saveWb(wb,"Detalle_notas_"+stamp()+".xlsx")};
 $("#pkQ").oninput=renderPkData;
 $("#pkAll").onclick=()=>{pkScope().forEach(n=>pkOff.delete(n.nv));store.set("pk_off",[...pkOff]);renderPkData()};
 $("#pkNone").onclick=()=>{pkScope().forEach(n=>pkOff.add(n.nv));store.set("pk_off",[...pkOff]);renderPkData()};
